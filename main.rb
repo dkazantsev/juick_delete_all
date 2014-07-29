@@ -18,7 +18,7 @@ class JuickClient
     @connection.auth @password
     @connection.send iamonline
 
-    puts "OK"
+    true
   rescue
     puts "Check you Jabber ID and it's password please"
     exit 1
@@ -33,6 +33,10 @@ class JuickClient
     message.type = :chat
 
     @connection.send(message)
+
+  rescue IOError
+    # don't know why but I have to reconnect
+    connect and retry
   end
 
   private
@@ -58,15 +62,17 @@ class Grabber < JuickClient
   private
 
   def set_hook!    
-    @connection.add_message_callback { |message| parse message.body }
+    @connection.add_message_callback { |message| parse message.body + "\n" }
   end
 
   def parse(body)
-    puts body
+    @body = body
 
     # checks
     return nil if body.lines.first =~ /Message not found/
-    return nil if body.lines.first =~ /\A@.+\:\n\z/
+    return nil unless body.lines.first =~ /\A@.+\:/
+
+    puts 1
 
     # body
     lines = []
@@ -80,21 +86,53 @@ class Grabber < JuickClient
     return nil unless link
     return nil unless lines[link[:num] + 1][:text] =~ /\A\n\z/
 
-    user = lines[0...link[:num]].find { |line| line[:text] =~ /\A@.+\:\n\z/ }
-    return nil unless link user
+    puts 2
 
     thread = link[:text].match(/#(\d+)\s+/)[1]
-    username = user[:text].match(/(@.+)\:\n/)[1]
+    owner = lines[0][:text].match(/(@.+)\:/)[1]
 
-    store_thread thread if username == @username
+    puts 3
+
+    store_thread thread if owner == @nickname
 
     # is there any comments?
-    comments = lines.find { |line| line[:line] =~ /\AReplies \(\d+\)\:\n/ }
+    return nil unless lines.find { |line| line[:text] =~ /\AReplies \(\d+\)\:\n\z/ }
+
+    puts 4
+
+    comments = []
+    users = []
+
+    lines[link[:num]..-1].each do |line|
+      if line[:text] =~ /\A@.+\:\n\z/
+
+        users << line[:text].match(/(@.+)\:/)[1]
+
+      elsif line[:text] =~ /\A#\d+\/\d+\n\z/
+
+        comments << line[:text].match(/#\d+\/(\d+)/)[1]
+
+      end        
+    end
+
+    puts 5
+
+    users.each_with_index do |user, ind|
+      if user == @nickname
+        store_comment thread, comments[ind]
+      end
+    end
+
+    puts 6
 
   end
 
   def store_thread(num)
+    puts "Thread :#{num}"
+  end
 
+  def store_comment(thread, num)
+    puts "Comment :#{num}"
   end
 
 end
